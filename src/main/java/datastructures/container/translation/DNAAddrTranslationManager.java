@@ -26,6 +26,9 @@ import java.util.function.Supplier;
 
 public class DNAAddrTranslationManager implements AddressTranslationManager<Long, BaseSequence> {
 
+    private static final long WAIT_MILLIS_FOR_BARCODE = 5L;
+    private static final int WAIT_TRIALS_FOR_BARCODE = 2;
+
     private final LSH<BaseSequence> lsh;
     private final Function<Long, BaseSequence> coder;
     private final int addressSize;
@@ -33,15 +36,16 @@ public class DNAAddrTranslationManager implements AddressTranslationManager<Long
     private final Container<Long, BaseSequence, ?> barcodeContainer;
     private final AtomicLong badAddresses;
     private final UniqueIDGenerator addrGen;
+    private final boolean optimistic;
     private final double minDist;
     private final boolean persistentTranslation;
     private final boolean persistentBarcodes;
     private final int addressTranslationTrials;
 
-
-    private DNAAddrTranslationManager(LSH<BaseSequence> lsh, double minDist, int addressSize, Coder<Long, BaseSequence> coder, int translationTrials, Container<Long, Long, ?> translationContainer, Container<Long, BaseSequence, ?> barcodesContainer, boolean persistentTranslation, boolean persistentBarcodes) {
+    private DNAAddrTranslationManager(LSH<BaseSequence> lsh, double minDist, int addressSize, Coder<Long, BaseSequence> coder, int translationTrials, Container<Long, Long, ?> translationContainer, Container<Long, BaseSequence, ?> barcodesContainer, boolean persistentTranslation, boolean persistentBarcodes, boolean optimistic) {
         this.lsh = lsh;
         this.coder = coder;
+        this.optimistic = optimistic;
         this.minDist = minDist;
         this.addressSize = addressSize;
         this.addressTranslationTrials = translationTrials;
@@ -55,13 +59,22 @@ public class DNAAddrTranslationManager implements AddressTranslationManager<Long
 
     @Override
     public DNATranslatedAddress translate(Long addr) {
-        Long translatedAddr = translationContainer.get(addr);
-        return translatedAddr == null ? computeTranslation(addr) : new DNATranslatedAddress(translatedAddr, barcodeContainer.get(addr));
-    }
+        var ta = translationContainer.get(addr);
+        if (ta == null)
+            return optimistic ? computeTranslationOptimistic(addr) : computeTranslation(addr);
 
-    public DNATranslatedAddress translateOptimistic(Long addr) {
-        Long translatedAddr = translationContainer.get(addr);
-        return translatedAddr == null ? computeTranslationOptimistic(addr) : new DNATranslatedAddress(translatedAddr, barcodeContainer.get(addr));
+        var barcode = barcodeContainer.get(addr);
+        if (barcode == null) {
+            int trials = WAIT_TRIALS_FOR_BARCODE;
+            while(barcode == null && trials-- > 0) {
+                FuncUtils.safeRun(() -> Thread.sleep(WAIT_MILLIS_FOR_BARCODE));
+                barcode = barcodeContainer.get(addr);
+            }
+            if (barcode == null)
+                return new DNATranslatedAddress(ta, coder.apply(ta));
+        }
+
+        return new DNATranslatedAddress(ta, barcode);
     }
 
     @Override
@@ -185,6 +198,7 @@ public class DNAAddrTranslationManager implements AddressTranslationManager<Long
         public static final double DEFAULT_MIN_DIST = 0.3d;
         public static final boolean DEFAULT_PERSISTENT_CONTAINERS = true;
         public static final boolean DEFAULT_DEEP_LSH = true;
+        public static final boolean DEFAULT_OPTIMISTIC = true;
         public static final Coder<String, BaseSequence> DEFAULT_STRING_CODER = RotatingTre.INSTANCE;
         public static final BiFunction<Integer, Boolean, LSH<BaseSequence>> DEFAULT_LSH = (addrSize, deep) -> deep ? MinHashLSH.newLSHForBaseSequences(4 * Math.max(1, addrSize / 200), 200, 20) : MinHashLSHLight.newLSHForBaseSequences(4 * Math.max(1, addrSize / 200), 200, 20);
         public static final Supplier<UniqueIDGenerator> DEFAULT_ADDR_GEN = UniqueIDGenerator::new;
@@ -219,6 +233,7 @@ public class DNAAddrTranslationManager implements AddressTranslationManager<Long
         private Boolean barcodesIsPersistent;
         private int addressTranslationTrials;
         private Boolean deepLSH;
+        private Boolean optimistic;
 
         public DNAAddrTranslationManager build() {
             this.addressEccSize = FuncUtils.conditionOrElse(addressEccSize, ecc -> ecc >= 0, () -> DEFAULT_ECC_LEN);
@@ -226,6 +241,7 @@ public class DNAAddrTranslationManager implements AddressTranslationManager<Long
             if (addressEccSize > 0 && addrSize % 4 != 0)
                 throw new RuntimeException("addressSize % 4 != 0");
 
+            this.optimistic = FuncUtils.nullEscape(optimistic, () -> DEFAULT_OPTIMISTIC);
             this.deepLSH = FuncUtils.nullEscape(deepLSH, () -> DEFAULT_DEEP_LSH);
             this.lsh = FuncUtils.nullEscape(lsh, () -> DEFAULT_LSH.apply(addrSize, deepLSH));
             this.numPermutations = FuncUtils.conditionOrElse(numPermutations, n -> n >= 0, () -> DEFAULT_ADDR_NUM_PERMUTATIONS);
@@ -267,8 +283,14 @@ public class DNAAddrTranslationManager implements AddressTranslationManager<Long
                     translationContainer,
                     barcodeContainer,
                     translationIsPersistent,
-                    barcodesIsPersistent
+                    barcodesIsPersistent,
+                    optimistic
             );
+        }
+
+        public Builder setOptimistic(Boolean optimistic) {
+            this.optimistic = optimistic;
+            return this;
         }
 
         public Builder setLsh(LSH<BaseSequence> lsh) {
