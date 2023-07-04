@@ -66,9 +66,10 @@ public class DistanceCoder extends PermutationCoder {
     public static float jaccardDistanceLowK(BitSet km1, BitSet km2) {
         BitSet intersectBitSet = (BitSet) km1.clone();
         intersectBitSet.and(km2);
-        km1.or(km2);
+        BitSet km1Copy = (BitSet) km1.clone();
+        km1Copy.or(km2);
 
-        return 1.0f - intersectBitSet.cardinality() / (float) km1.cardinality();
+        return 1.0f - intersectBitSet.cardinality() / (float) km1Copy.cardinality();
     }
 
     public static BitSet kmersJaccard(BaseSequence seq, int k) {
