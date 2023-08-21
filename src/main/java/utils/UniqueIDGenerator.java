@@ -17,10 +17,18 @@ public class UniqueIDGenerator implements Supplier<Long> {
 
     @Override
     public Long get() {
-        return getN(1)[0];
+        return getNBoxed(1)[0];
     }
 
-    public synchronized Long[] getN(int n) {
+    public void advance() {
+        get();
+    }
+
+    public void sync(long lastId) {
+        nextFreeId = Math.max(lastId + 1, nextFreeId);
+    }
+
+    public synchronized Long[] getNBoxed(int n) {
         long start = nextFreeId;
         nextFreeId += n;
         Long[] result = new Long[n];
@@ -28,6 +36,16 @@ public class UniqueIDGenerator implements Supplier<Long> {
             result[i] = start++;
 
        return result;
+    }
+
+    public synchronized long[] getN(int n) {
+        long start = nextFreeId;
+        nextFreeId += n;
+        long[] result = new long[n];
+        for (int i = 0; i < n; i++)
+            result[i] = start++;
+
+        return result;
     }
 
     public long getStart() {

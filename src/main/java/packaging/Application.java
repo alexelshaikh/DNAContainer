@@ -3,11 +3,10 @@ package packaging;
 import core.BaseSequence;
 import core.dnarules.BasicDNARules;
 import core.dnarules.DNARulesCollection;
-import datastructures.container.AddressTranslationManager;
 import datastructures.container.Container;
 import datastructures.container.impl.PersistentContainer;
 import datastructures.container.impl.SizedDNAContainer;
-import datastructures.container.translation.DNAAddrTranslationManager;
+import datastructures.container.translation.DNAAddrManager;
 import dnacoders.dnaconvertors.Bin;
 import dnacoders.dnaconvertors.RotatingQuattro;
 import dnacoders.dnaconvertors.RotatingTre;
@@ -16,9 +15,8 @@ import utils.*;
 import utils.csv.BufferedCsvReader;
 import utils.csv.CsvLine;
 import utils.lsh.LSH;
-import utils.lsh.minhash.BitMinHashLSH;
 import utils.lsh.minhash.MinHashLSH;
-import utils.lsh.minhash.MinHashLSHLight;
+import utils.lsh.storage.LSHStorage;
 import utils.rq.RQCoder;
 import utils.serializers.FixedSizeSerializer;
 import java.nio.ByteBuffer;
@@ -69,24 +67,25 @@ public class Application {
 
 
         long nBits;
+        long nHashfunctions;
         LSH<BaseSequence> oligoLSH;
         LSH<BaseSequence> addrLSH;
-        Object lshType = lshParams.get("type");
-        if (lshType.equals("bloom")) {
+        String lshType = lshParams.getString("type");
+        if (lshType.equalsIgnoreCase("bloom")) {
             nBits = lshParams.getLong("nBits");
-
-            oligoLSH = BitMinHashLSH.newLSHForBaseSequences(k, r, nBits);
-            addrLSH = BitMinHashLSH.newLSHForBaseSequences(k, r, nBits);
+            nHashfunctions = lshParams.getLong("nHashFunctions");
+            oligoLSH = MinHashLSH.newSeqAmpLSHBloom(k, r, b, nBits, nHashfunctions, LSHStorage.AmplifiedLSHStorage.Amplification.OR);
+            addrLSH = MinHashLSH.newSeqAmpLSHBloom(k, r, b, nBits, nHashfunctions, LSHStorage.AmplifiedLSHStorage.Amplification.OR);
             System.out.println("LSH type: BloomLSH");
         }
-        else if (lshType.equals("traditional")) {
-            oligoLSH = MinHashLSH.newLSHForBaseSequences(k, r, b);
-            addrLSH = MinHashLSH.newLSHForBaseSequences(k, r, b);
+        else if (lshType.equalsIgnoreCase("HT")) {
+            oligoLSH = MinHashLSH.newSeqAmpLSHTraditional(k, r, b, LSHStorage.AmplifiedLSHStorage.Amplification.OR);
+            addrLSH = MinHashLSH.newSeqAmpLSHTraditional(k, r, b, LSHStorage.AmplifiedLSHStorage.Amplification.OR);
             System.out.println("LSH type: TraditionalLSH");
         }
         else {
-            oligoLSH = MinHashLSHLight.newLSHForBaseSequences(k, r, b);
-            addrLSH = MinHashLSHLight.newLSHForBaseSequences(k, r, b);
+            oligoLSH = MinHashLSH.newSeqAmpLSHLight(k, r, b, LSHStorage.AmplifiedLSHStorage.Amplification.OR);
+            addrLSH = MinHashLSH.newSeqAmpLSHLight(k, r, b, LSHStorage.AmplifiedLSHStorage.Amplification.OR);
             System.out.println("LSH type: LightLSH");
         }
 
@@ -117,14 +116,14 @@ public class Application {
         calc(path, delim, coder, idTranslation.getT2(), idTranslation.getT1(), barcodesTranslation.getT2(), barcodesTranslation.getT1(), count, addrSize, addressPermutations, payloadSize, payloadPadding, payloadPermutations, id, oligoLSH, addrLSH);
     }
 
-    private static Pair<Boolean, Container<Long, Long, Long>> parseIdsContainer(JSONObject translationOptions) {
+    private static Pair<Boolean, Container<Long, Long>> parseIdsContainer(JSONObject translationOptions) {
         if (translationOptions.getBoolean("persistIds"))
             return new Pair<>(true, new PersistentContainer<>(translationOptions.getString("idsTranslationPath"), FixedSizeSerializer.LONG));
 
         return new Pair<>(false, Container.discardingContainer());
     }
 
-    private static Pair<Boolean, Container<Long, BaseSequence, Long>> parseBarcodesContainer(JSONObject translationOptions, int addrSize) {
+    private static Pair<Boolean, Container<Long, BaseSequence>> parseBarcodesContainer(JSONObject translationOptions, int addrSize) {
         if (translationOptions.getBoolean("persistBarcodes")) {
             if (addrSize % 4 != 0)
                 throw new RuntimeException("address size must be divisible by 4 when using persistent storage for the translated barcodes! You used address size: " + addrSize);
@@ -174,26 +173,27 @@ public class Application {
             throw new RuntimeException("Invalid coder '" + name + "' not found");
     }
 
-    public static void calc(String csvPath, String delim, Coder<String, BaseSequence> coder, Container<Long, Long, Long> idsContainer, boolean idsContainerIsPersistent, Container<Long, BaseSequence, Long> barcodesContainer, boolean barcodesContainerIsPersistent, long numEntries, int addressSize, int addressPermutations, int payloadSize, int payloadPadding, int payloadPermutations, String id, LSH<BaseSequence> oligoLSH, LSH<BaseSequence> lshAddrs) {
+    public static void calc(String csvPath, String delim, Coder<String, BaseSequence> coder, Container<Long, Long> idsContainer, boolean idsContainerIsPersistent, Container<Long, BaseSequence> barcodesContainer, boolean barcodesContainerIsPersistent, long numEntries, int addressSize, int addressPermutations, int payloadSize, int payloadPadding, int payloadPermutations, String id, LSH<BaseSequence> oligoLSH, LSH<BaseSequence> lshAddrs) {
 
-        AddressTranslationManager<Long, BaseSequence> atm = DNAAddrTranslationManager
+        DNAAddrManager atm = DNAAddrManager
                 .builder()
                 .setLsh(lshAddrs)
                 .setAddrSize(addressSize)
                 .setNumPermutations(addressPermutations)
-                .setContainers(idsContainer, barcodesContainer, idsContainerIsPersistent, barcodesContainerIsPersistent)
+                .setAddressRoutingContainer(idsContainer)
+                .setAddressTranslationContainer(barcodesContainer)
                 .build();
 
         SizedDNAContainer dnaContainer = SizedDNAContainer
                 .builder()
-                .setAddressTranslationManager(atm)
+                .setAddressManager(atm)
                 .setOligoLSH(oligoLSH)
                 .setPayloadSize(payloadSize)
                 .setNumGcCorrectionsPayload(payloadPadding)
                 .setNumPayloadPermutations(payloadPermutations)
                 .build();
 
-        Container<Long, String, BaseSequence> container = Container.transform(dnaContainer, coder);
+        Container<Long, String> container = Container.transform(dnaContainer, coder);
 
         BufferedCsvReader reader = new BufferedCsvReader(csvPath, delim);
 

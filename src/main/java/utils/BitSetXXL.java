@@ -14,6 +14,7 @@ public class BitSetXXL implements Streamable<Long> {
     private static final boolean DEFAULT_PREALLOCATE = false;
 
     private final BitSet[] bitSets;
+    private final BigInteger numBits;
 
     public BitSetXXL(long numBits) {
         this(BigInteger.valueOf(numBits), DEFAULT_PREALLOCATE);
@@ -36,12 +37,17 @@ public class BitSetXXL implements Streamable<Long> {
         int numBitSets = numBits.divide(MAX_BITS_PER_BITSET).add(BigInteger.ONE).intValue();
 
         this.bitSets = new BitSet[numBitSets];
+        this.numBits = new BigInteger(numBits.toByteArray());
         for (int i = 0; i < numBitSets; i++) {
             if (preallocate)
                 bitSets[i] = new BitSet(MAX_BITS_PER_BITSET_INT);
             else
                 bitSets[i] = new BitSet();
         }
+    }
+
+    public BigInteger getNumBits() {
+        return numBits;
     }
 
     public int numBitSetsInUse() {
@@ -116,6 +122,13 @@ public class BitSetXXL implements Streamable<Long> {
         if (bitIndexInBitSet < 0)
             throw new RuntimeException("bitIndexInBitSet < 0");
         return bitIndexInBitSet;
+    }
+
+    @Override
+    public String toString() {
+        return "BitSetXXL{" +
+                "numBits=" + numBits +
+                '}';
     }
 }
 

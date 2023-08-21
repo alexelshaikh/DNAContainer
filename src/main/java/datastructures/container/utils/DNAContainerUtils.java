@@ -1,10 +1,12 @@
 package datastructures.container.utils;
 
 import core.BaseSequence;
-import utils.AddressedDNA;
 import datastructures.container.DNAContainer;
+import datastructures.container.translation.RoutingManager;
+import utils.AddressedDNA;
 import utils.DNAPacker;
 import utils.FuncUtils;
+import utils.Pair;
 import java.util.*;
 import java.util.stream.IntStream;
 
@@ -20,7 +22,7 @@ public class DNAContainerUtils {
 
     public static long putArray(DNAContainer container, boolean parallel, BaseSequence... seqs) {
         int arrayLength = seqs.length;
-        Long[] ids = container.registerIds(arrayLength + 1);
+        long[] ids = container.registerIds(arrayLength + 1);
         long headerId = ids[0];
         int packedArrayLength = arrayLength - 1;
         DNAPacker.LengthBase lb = DNAPacker.LengthBase.fromUnsignedNumber(packedArrayLength);
@@ -159,7 +161,7 @@ public class DNAContainerUtils {
         if (seqs == null || seqs.isEmpty())
             return putEmptyList(container);
 
-        Long[] ids = container.registerIds(seqs.size() + 1);
+        long[] ids = container.registerIds(seqs.size() + 1);
         for (int i = 0; i < seqs.size(); i++)
             container.put(ids[i], BaseSequence.join(DNAPacker.pack(ids[i + 1], DNAPacker.LengthBase.INT_64), seqs.get(i)));
 
@@ -174,7 +176,7 @@ public class DNAContainerUtils {
     }
 
     public static long putEmptyList(DNAContainer container) {
-        Long[] ids = container.registerIds(2);
+        long[] ids = container.registerIds(2);
         container.put(ids[0], DNAPacker.pack(ids[1], DNAPacker.LengthBase.INT_64));
         return ids[0];
     }
@@ -184,6 +186,10 @@ public class DNAContainerUtils {
     }
 
     public static Iterator<BaseSequence> getListIterator(DNAContainer container, long listId) {
+        return FuncUtils.stream(() -> getRichListIterator(container, listId)).map(Pair::getT1).iterator();
+    }
+
+    public static Iterator<Pair<BaseSequence, Long>> getRichListIterator(DNAContainer container, long listId) {
         BaseSequence seq = container.get(listId);
         if (seq == null)
             return Collections.emptyIterator();
@@ -197,22 +203,22 @@ public class DNAContainerUtils {
         final long nextId = listId;
 
         return new Iterator<>() {
-           BaseSequence s = seqFinal;
-           long id = nextId;
+            BaseSequence s = seqFinal;
+            long id = nextId;
 
             @Override
             public boolean hasNext() {
-                return s != null;
+                return s != null && s.length() > DNAPacker.LengthBase.INT_64.totalSize();
             }
 
             @Override
-            public BaseSequence next() {
+            public Pair<BaseSequence, Long> next() {
                 if (!hasNext())
                     throw new NoSuchElementException("Iterator exhausted! No more elements to return.");
                 BaseSequence r = s.window(DNAPacker.LengthBase.INT_64.totalSize());
                 id = DNAPacker.unpack(s, false).longValue();
                 s = container.get(id);
-                return r;
+                return new Pair<>(r, id);
             }
         };
     }
@@ -251,10 +257,34 @@ public class DNAContainerUtils {
             seq = container.get(id);
         } while(seq != null);
 
-        Long[] ids = container.registerIds(seqs.size());
+        long[] ids = container.registerIds(seqs.size());
         container.put(id, BaseSequence.join(DNAPacker.pack(ids[0], DNAPacker.LengthBase.INT_64), seqs.get(0)));
         for (int i = 1; i < seqs.size(); i++)
             container.put(ids[i - 1], BaseSequence.join(DNAPacker.pack(ids[i], DNAPacker.LengthBase.INT_64), seqs.get(i)));
+
+        return true;
+    }
+
+
+    public static boolean insertIntoList(DNAContainer container, long id, int pos, BaseSequence seq) {
+        if (pos < 0)
+            return false;
+
+        var atm = container.getAddressManager();
+        long idNew = container.registerId();
+        long idNewRouted = atm.route(idNew).routed();
+
+        Long idPrevious = pos == 0 ? Long.valueOf(id) : FuncUtils.stream(() -> getRichListIterator(container, id)).skip(pos - 1).findFirst().map(Pair::getT2).orElse(null);
+        if (idPrevious == null)
+            return appendToList(container, id, seq);
+
+        long idNext = container.registerId();
+        long idPreviousRouted = atm.route(idPrevious).routed();
+
+        container.put(idNew, BaseSequence.join(DNAPacker.pack(idNext, DNAPacker.LengthBase.INT_64), seq));
+
+        atm.addressRoutingManager().put(new RoutingManager.RoutedAddress<>(idPrevious, idNewRouted));
+        atm.addressRoutingManager().put(new RoutingManager.RoutedAddress<>(idNext, idPreviousRouted));
 
         return true;
     }

@@ -103,8 +103,8 @@ public class DistanceCoder extends PermutationCoder {
     }
 
     public static float distanceScoreFilter(BaseSequence seq, LSH<BaseSequence> lsh, Predicate<BaseSequence> filter) {
-        if (lsh instanceof MinHashLSH<BaseSequence> deep) {
-            Set<BaseSequence> hits = deep.similarElements(seq);
+        if (lsh instanceof MinHashLSH.Traditional<BaseSequence> deep) {
+            Set<BaseSequence> hits = deep.candidates(seq);
             if (hits.isEmpty()) {
                 return 1.0f;
             }
@@ -124,7 +124,7 @@ public class DistanceCoder extends PermutationCoder {
             }
         }
 
-        return lsh.isPresent(seq) ? 0.0f : 1.0f;
+        return lsh.query(seq) ? 0.0f : 1.0f;
     }
 }
 

@@ -1,34 +1,103 @@
 package datastructures.container;
 
-import utils.UniqueIDGenerator;
-import utils.Coder;
-import utils.Pair;
-import utils.Streamable;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Function;
-import java.util.stream.LongStream;
+import utils.*;
 
-public interface Container<K, V, T> extends Streamable<Pair<K, V>> {
-    K put(V value);
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
+import java.util.stream.Stream;
+
+public interface Container<K, V> extends Streamable<Pair<K, V>> {
     void put(K key, V value);
+    boolean remove(K key);
     V get(K key);
+
     long size();
-    K[] registerIds(int n);
     Collection<V> values();
     Set<K> keys();
-    AddressTranslationManager<K, T> getAddressTranslationManager();
 
-    default K registerId() {
-        return registerIds(1)[0];
+    boolean isPersistent();
+
+    default boolean contains(K key) {
+        return get(key) != null;
     }
 
-    static <K, V1, V2, T> Container<K, V1, T> transform(Container<K, V2, T> container, Coder<V1, V2> mapper) {
+    @Override
+    default Iterator<Pair<K, V>> iterator() {
+        return stream().iterator();
+    }
+    @Override
+    default Stream<Pair<K, V>> stream() {
+        return keys().stream().map(k -> new Pair<>(k, get(k)));
+    }
+
+    static <K, V> Container<K, V> synchronizedContainer(Container<K, V> container) {
         return new Container<>() {
+            final ReadWriteLock lock = new ReentrantReadWriteLock();
+
             @Override
-            public K put(V1 value) {
-                return container.put(mapper.encode(value));
+            public void put(K key, V value) {
+                writeLocked(Executors.callable(() -> container.put(key, value)));
             }
+
+            @Override
+            public boolean remove(K key) {
+                return writeLocked(() -> container.remove(key));
+            }
+
+            @Override
+            public V get(K key) {
+                return readLocked(() -> container.get(key));
+            }
+
+            @Override
+            public long size() {
+                return readLocked(container::size);
+            }
+
+            @Override
+            public Collection<V> values() {
+                return readLocked(container::values);
+            }
+
+            @Override
+            public Set<K> keys() {
+                return readLocked(container::keys);
+            }
+
+            @Override
+            public boolean isPersistent() {
+                return container.isPersistent();
+            }
+
+            private <T> T readLocked(Callable<T> callable) {
+                lock.readLock().lock();
+                T result = FuncUtils.safeCall(callable);
+                lock.readLock().unlock();
+                return result;
+            }
+
+            private <T> T writeLocked(Callable<T> callable) {
+                lock.writeLock().lock();
+                T result = FuncUtils.safeCall(callable);
+                lock.writeLock().unlock();
+                return result;
+            }
+        };
+    }
+
+
+
+    static <K, V1, V2> Container<K, V1> transform(Container<K, V2> container, Coder<V1, V2> mapper) {
+        return new Container<>() {
             @Override
             public void put(K key, V1 value) {
                 container.put(key, mapper.encode(value));
@@ -42,10 +111,6 @@ public interface Container<K, V, T> extends Streamable<Pair<K, V>> {
                 return container.size();
             }
             @Override
-            public K[] registerIds(int n) {
-                return container.registerIds(n);
-            }
-            @Override
             public Collection<V1> values() {
                 return container.values().stream().map(mapper::decode).toList();
             }
@@ -54,34 +119,19 @@ public interface Container<K, V, T> extends Streamable<Pair<K, V>> {
                 return container.keys();
             }
             @Override
-            public AddressTranslationManager<K, T> getAddressTranslationManager() {
-                return container.getAddressTranslationManager();
+            public boolean remove(K key) {
+                return container.remove(key);
             }
 
             @Override
-            public Iterator<Pair<K, V1>> iterator() {
-                return new Iterator<>() {
-                    Iterator<Pair<K, V2>> it = container.iterator();
-                    @Override
-                    public boolean hasNext() {
-                        return it.hasNext();
-                    }
-                    @Override
-                    public Pair<K, V1> next() {
-                        var p = it.next();
-                        return new Pair<>(p.getT1(), mapper.decode(p.getT2()));
-                    }
-                };
+            public boolean isPersistent() {
+                return container.isPersistent();
             }
         };
     }
 
-    static <K, V, T> Container<K, V, T> discardingContainer() {
+    static <K, V> Container<K, V> discardingContainer() {
         return new Container<>() {
-            @Override
-            public K put(V value) {
-                return null;
-            }
             @Override
             public void put(K key, V value) {
             }
@@ -91,95 +141,42 @@ public interface Container<K, V, T> extends Streamable<Pair<K, V>> {
             }
             @Override
             public long size() {
-                return 0;
-            }
-            @Override
-            public K[] registerIds(int n) {
-                return (K[]) new Object[0];
+                return 0L;
             }
             @Override
             public Collection<V> values() {
                 return Collections.emptyList();
             }
             @Override
+            public boolean remove(K key) {
+                return true;
+            }
+            @Override
             public Set<K> keys() {
                 return Collections.emptySet();
             }
             @Override
-            public AddressTranslationManager<K, T> getAddressTranslationManager() {
-                return null;
-            }
-            @Override
-            public Iterator<Pair<K, V>> iterator() {
-                return Collections.emptyIterator();
+            public boolean isPersistent() {
+                return false;
             }
         };
     }
 
-    abstract class LongContainer<V, T> implements Container<Long, V, T> {
-        protected final UniqueIDGenerator idsGen;
-        public LongContainer(UniqueIDGenerator idsGen) {
-            this.idsGen = idsGen;
-        }
-        public LongContainer() {
-            this(new UniqueIDGenerator());
-        }
-        @Override
-        public Long[] registerIds(int n) {
-            return idsGen.getN(n);
-        }
-        @Override
-        public Iterator<Pair<Long, V>> iterator() {
-            return LongStream.range(idsGen.getStart(), size()).mapToObj(id -> new Pair<>(id, get(id))).iterator();
-        }
-    }
-
-    abstract class MapContainer<K, V> implements Container<K, V, K> {
-        private final ConcurrentHashMap<K, V> store;
+    class MapContainer<K, V> implements Container<K, V> {
+        protected final ConcurrentHashMap<K, V> store;
 
         public MapContainer() {
             this.store = new ConcurrentHashMap<>();
         }
 
-        public static <K, V> MapContainer<K, V> of(Function<Integer, K[]> reservationFunc) {
-            return new MapContainer<>() {
-                @Override
-                public K[] registerIds(int n) {
-                    return reservationFunc.apply(n);
-                }
-                @Override
-                public AddressTranslationManager<K, K> getAddressTranslationManager() {
-                    return AddressTranslationManager.identity();
-                }
-            };
-        }
-
-        public static <V> MapContainer<Long, V> ofLong() {
-            UniqueIDGenerator gen = new UniqueIDGenerator();
-            return of(gen::getN);
+        @Override
+        public boolean remove(K key) {
+            return store.remove(key) != null;
         }
 
         @Override
-        public K put(V value) {
-            K key = registerId();
-            store.put(key, value);
-            return key;
-        }
-
-        @Override
-        public Iterator<Pair<K, V>> iterator() {
-            return new Iterator<>() {
-                final Iterator<Map.Entry<K, V>> it = store.entrySet().iterator();
-                @Override
-                public boolean hasNext() {
-                    return it.hasNext();
-                }
-                @Override
-                public Pair<K, V> next() {
-                    Map.Entry<K, V> n = it.next();
-                    return new Pair<>(n.getKey(), n.getValue());
-                }
-            };
+        public boolean isPersistent() {
+            return false;
         }
 
         @Override
@@ -205,6 +202,43 @@ public interface Container<K, V, T> extends Streamable<Pair<K, V>> {
         @Override
         public Set<K> keys() {
             return store.keySet();
+        }
+    }
+
+    abstract class LinearLongContainer<V> implements Container<Long, V> {
+        protected final UniqueIDGenerator gen;
+
+        public LinearLongContainer() {
+            this(0L);
+        }
+
+        public LinearLongContainer(long startId) {
+            this.gen = new UniqueIDGenerator(startId);
+        }
+
+        public long put(V value) {
+            long id = registerId();
+            put(id, value);
+            return id;
+        }
+
+        public long registerId() {
+            return gen.get();
+        }
+
+
+        public long[] registerIds(int n) {
+            return gen.getN(n);
+        }
+
+        @Override
+        public Collection<V> values() {
+            return LongStream.range(0L, size()).mapToObj(this::get).toList();
+        }
+
+        @Override
+        public Set<Long> keys() {
+            return LongStream.range(0L, size()).boxed().collect(Collectors.toSet());
         }
     }
 }

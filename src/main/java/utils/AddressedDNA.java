@@ -7,6 +7,10 @@ public class AddressedDNA extends Pair<BaseSequence, BaseSequence> {
         super(seq1, seq2);
     }
 
+    public static AddressedDNA of(BaseSequence oligo, int addrSize) {
+        return new AddressedDNA(oligo.window(0, addrSize), oligo.window(addrSize, oligo.length()));
+    }
+
     public BaseSequence address() {
         return t1;
     }

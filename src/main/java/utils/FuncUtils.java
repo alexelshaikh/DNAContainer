@@ -7,6 +7,8 @@ import java.nio.file.Path;
 import java.text.NumberFormat;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.BaseStream;
@@ -183,6 +185,89 @@ public final class FuncUtils {
     }
 
     /**
+     * Creates a zipped stream of two input streams. The resulting zipped stream contains pairs in which the first object is from the first stream, and the second object is from the second stream at the same position. The objects are filled up with null if the two streams are not of equal length.
+     * @param s1 the first input stream.
+     * @param s2 the second input stream.
+     * @return the zipped stream.
+     */
+    public static <T1, T2, S1 extends BaseStream<T1, S1>, S2 extends BaseStream<T2, S2>> Stream<Pair<T1, T2>> zip(S1 s1, S2 s2) {
+        return zip(s1, s2, Pair::new);
+    }
+
+    /**
+     * Creates a zipped stream of two input streams. The resulting zipped stream contains Objects created by the BiFunction<T1, T2, Z> supplied in which the first object is from the first stream, and the second object is from the second stream at the same position. The objects are filled up with null if the two streams are not of equal length.
+     * @param s1 the first input stream.
+     * @param s2 the second input stream.
+     * @param zof the function that zips one object from s1 and another from s2 to a zipped object.
+     * @return the zipped stream.
+     */
+    public static <T1, T2, Z, S1 extends BaseStream<T1, S1>, S2 extends BaseStream<T2, S2>> Stream<Z> zip(S1 s1, S2 s2, BiFunction<T1, T2, Z> zof) {
+        return stream(() ->  new Iterator<>() {
+            final Iterator<T1> it1 = s1.iterator();
+            final Iterator<T2> it2 = s2.iterator();
+
+            @Override
+            public boolean hasNext() {
+                return it1.hasNext() || it2.hasNext();
+            }
+
+            @Override
+            public Z next() {
+                return zof.apply(nextT(it1), nextT(it2));
+            }
+
+            private <T> T nextT(Iterator<T> it) {
+                return it.hasNext() ? it.next() : null;
+            }
+        });
+    }
+
+    /**
+     * Returns a consistent hash value for an arbitrary object. The input object can be a reference, primitive, or an array of the previous options. This method always returns the same hash value for two equal objects.
+     * @param o the object for which a consistent hash value is to be computed.
+     * @return the consistent hash value.
+     */
+    public static int consistentHash(Object o) {
+        if (o == null)
+            return 0;
+
+        if (o.getClass().isArray()) {
+            if (o instanceof Object[] oo)
+                return Arrays.hashCode(oo);
+            else if (o instanceof boolean[] oo)
+                return Arrays.hashCode(oo);
+            else if (o instanceof byte[] oo)
+                return Arrays.hashCode(oo);
+            else if (o instanceof char[] oo)
+                return Arrays.hashCode(oo);
+            else if (o instanceof double[] oo)
+                return Arrays.hashCode(oo);
+            else if (o instanceof float[] oo)
+                return Arrays.hashCode(oo);
+            else if (o instanceof int[] oo)
+                return Arrays.hashCode(oo);
+            else if (o instanceof long[] oo)
+                return Arrays.hashCode(oo);
+            else if (o instanceof short[] oo)
+                return Arrays.hashCode(oo);
+            else
+                throw new AssertionError();
+        }
+        else
+            return Objects.hashCode(o);
+    }
+
+    /**
+     * Creates a stream that consists of the same elements as the input stream, but numbered from 0 to n-1.
+     * @param stream the input stream.
+     * @return an enumerated stream.
+     */
+    public static <T, S extends BaseStream<T, S>> Stream<Pair<Integer, T>> enumerate(S stream) {
+        AtomicInteger i = new AtomicInteger(0);
+        return StreamSupport.stream(stream.spliterator(), stream.isParallel()).map(e -> new Pair<>(i.getAndIncrement(), e));
+    }
+
+    /**
      * @param array the array containing all possible outcomes.
      * @return a random element in array.
      */
@@ -192,10 +277,14 @@ public final class FuncUtils {
 
 
     public static <T> T nullEscape(T t, Supplier<T> escape) {
-        return conditionOrElse(t, Objects::nonNull, escape);
+        return conditionOrElse(Objects::nonNull, t, escape);
     }
 
-    public static <T> T conditionOrElse(T t, Predicate<T> p, Supplier<T> escape) {
+    public static <T> T nullEscape(T t, T escape) {
+        return conditionOrElse(Objects::nonNull, t, () -> escape);
+    }
+
+    public static <T> T conditionOrElse(Predicate<T> p, T t, Supplier<T> escape) {
         return p.test(t) ? t : escape.get();
     }
 
