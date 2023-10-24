@@ -19,6 +19,10 @@ public class AddressedDNA extends Pair<BaseSequence, BaseSequence> {
         return t2;
     }
 
+    public int length() {
+        return t1.length() + t2.length();
+    }
+
     public BaseSequence join() {
         return BaseSequence.join(address(), payload());
     }

@@ -1,7 +1,6 @@
 package datastructures.container.impl;
 
 import core.BaseSequence;
-import datastructures.container.Container;
 import datastructures.container.DNAContainer;
 import datastructures.container.translation.AddressManager;
 import utils.AddressedDNA;
@@ -9,16 +8,20 @@ import java.util.Collection;
 
 public class DNAStorageMap extends DNAContainer.DNAStorage {
 
-    final Container.MapContainer<Long, AddressedDNA[]> map;
+    final MapContainer<Long, AddressedDNA> map;
 
     public DNAStorageMap(AddressManager<Long, BaseSequence> am) {
         super(am);
-        this.map = new Container.MapContainer<>();
+        this.map = new MapContainer<>();
     }
 
     @Override
-    public void put(AddressManager.ManagedAddress<Long, BaseSequence> key, AddressedDNA[] value) {
+    public void put(AddressManager.ManagedAddress<Long, BaseSequence> key, AddressedDNA value) {
         map.put(key.routed(), value);
+    }
+
+    public MapContainer<Long, AddressedDNA> getMap() {
+        return map;
     }
 
     @Override
@@ -27,7 +30,7 @@ public class DNAStorageMap extends DNAContainer.DNAStorage {
     }
 
     @Override
-    public AddressedDNA[] get(AddressManager.ManagedAddress<Long, BaseSequence> key) {
+    public AddressedDNA get(AddressManager.ManagedAddress<Long, BaseSequence> key) {
         return map.get(key.routed());
     }
 
@@ -37,7 +40,7 @@ public class DNAStorageMap extends DNAContainer.DNAStorage {
     }
 
     @Override
-    public Collection<AddressedDNA[]> values() {
+    public Collection<AddressedDNA> values() {
         return map.values();
     }
 
@@ -47,17 +50,19 @@ public class DNAStorageMap extends DNAContainer.DNAStorage {
     }
 
     @Override
-    public void put(long key, AddressedDNA[] value) {
+    public void put(long key, AddressedDNA value) {
         map.put(am.route(key).routed(), value);
     }
 
     @Override
     public boolean remove(long key) {
-        return map.remove(am.route(key).routed());
+        var routed = am.addressRoutingManager().get(key).routed();
+        return routed != null && map.remove(routed);
     }
 
     @Override
-    public AddressedDNA[] get(long key) {
-        return map.get(am.route(key).routed());
+    public AddressedDNA get(long key) {
+        var routed = am.addressRoutingManager().get(key).routed();
+        return routed == null ? null : map.get(routed);
     }
 }

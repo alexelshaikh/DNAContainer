@@ -1,14 +1,13 @@
-import core.BaseSequence;
-import datastructures.container.Container;
 import datastructures.container.DNAContainer;
+import datastructures.container.impl.RichDNAContainer;
 import datastructures.container.translation.DNAAddrManager;
-import datastructures.container.utils.DNAContainerUtils;
 import datastructures.hashtable.BloomFilter;
+import dnacoders.dnaconvertors.*;
 import packaging.Application;
 import utils.Coder;
 import utils.lsh.minhash.MinHashLSH;
 import utils.rq.RQCoder;
-import java.util.Objects;
+import java.util.Arrays;
 
 public class DNAContainerTest {
 
@@ -27,6 +26,16 @@ public class DNAContainerTest {
         int payloadPermutations = 8;
 
 
+        var coderGoldman = RotatingTre.INSTANCE;
+        var coderQuattro = RotatingQuattro.INSTANCE;
+        var coderBin = Bin.INSTANCE;
+        var coderFountain = Coder.fuse(Application.BIJECTIVE_STRING_CODER, RQCoder.DEFAULT_RQ); // fountain code
+
+        //var coder = coder1;
+        //var coder = coder2;
+        //var coder = coder3;
+        var coder = coderFountain;
+
         DNAAddrManager atm = DNAAddrManager
                 .builder()
                 .setLsh(MinHashLSH.newSeqLSHBloom(k, r, nBits, nHashFunctions))
@@ -35,63 +44,54 @@ public class DNAContainerTest {
                 .build();
 
 
-        DNAContainer seqContainer = DNAContainer
+        RichDNAContainer<String> container = DNAContainer
                 .builder()
                 .setAddressManager(atm)
                 .setOligoLSH(MinHashLSH.newSeqLSHBloom(k, r, nBits, nHashFunctions))
                 .setPayloadSize(payloadSize)
                 .setNumGcCorrectionsPayload(payloadPaddingSize)
                 .setNumPayloadPermutations(payloadPermutations)
-                .build();
+                .buildToRichContainer(coder);
 
-        //var coder = RotatingTre.INSTANCE;
-        //var coder = RotatingQuattro.INSTANCE;
-        //var coder = Bin.INSTANCE;
-        var coder = Coder.fuse(Application.BIJECTIVE_STRING_CODER, RQCoder.DEFAULT_RQ); // fountain code
 
-        Container<Long, String> container = Container.transform(seqContainer, coder);
 
         // reference
-        long referenceId = seqContainer.registerId();
-        container.put(0L, "hello world");
-        System.out.println("getting the reference with id: " + referenceId + " -> " + container.get(referenceId));
+        long referenceId = container.registerId();
+        var ref = container.putReference(referenceId, "hello world");
+        System.out.println("getting the reference with id: " + referenceId + " -> " + container.getReference(referenceId).decode());
+        System.out.println("getting the reference by ref.decode(): " + " -> " + ref.decode());
 
         System.out.println();
 
         // array
-        long arrayId = DNAContainerUtils.putArray(seqContainer, coder.encode("hello world 1"), coder.encode("hello world 2"), coder.encode("hello world 3"));
-        System.out.println("getting the elements of the array of id: " + arrayId);
+        var array = container.putArray(new String[] {"hello world 1", "hello world 2", "hello world 3"});
+        System.out.println("getting the elements of the array with id: " + array.sketch().id() + " -> " + container.getArray(array.sketch().id()).decode());
+        System.out.println("getting the elements of the array by array.decode(): " + " -> " + array.decode());
 
         // number of objects in the array
-        int arrayLength = DNAContainerUtils.getArrayLength(seqContainer, arrayId);
+        int arrayLength = array.length();
         for (int i = 0; i < arrayLength; i++)
-            System.out.println("\tpos: " + i + " -> " + coder.decode(Objects.requireNonNull(DNAContainerUtils.getArrayPos(seqContainer, arrayId, i))));
+            System.out.println("\tpos: " + i + " -> " + array.get(i));
 
         System.out.println();
 
         // list
-        long listId = DNAContainerUtils.putList(seqContainer, coder.encode("hello world 1"), coder.encode("hello world 2"), coder.encode("hello world 3"));
-        printList(seqContainer, listId, coder);
+        var list = container.putList(Arrays.asList("hello world 1", "hello world 2", "hello world 3"));
+        System.out.println("getting the elements of the list with id: " + list.sketch().id() + " -> " + container.getList(list.sketch().id()).decode());
+        System.out.println("getting the elements of the list by list.decode(): " + " -> " + list.decode());
 
         System.out.println();
 
         // appending to the list
-        System.out.println("successfully appended a new element to the list: " + DNAContainerUtils.appendToList(seqContainer, listId, coder.encode("hello world 4")));
-        printList(seqContainer, listId, coder);
+        System.out.println("successfully appended a new element to the list: " + list.append("hello world 4"));
+        System.out.println(list.decode());
 
         System.out.println();
 
         // inserting a new element into an arbitrary list's position
         int pos = 0;
         System.out.println("inserting a new element into the list at position " + pos);
-        DNAContainerUtils.insertIntoList(seqContainer, listId, pos, coder.encode("hello new element!"));
-        printList(seqContainer, listId, coder);
-    }
-
-    static void printList(DNAContainer dnaContainer, long listId, Coder<String, BaseSequence> coder) {
-        var listIterator = DNAContainerUtils.getListIterator(dnaContainer, listId);
-        System.out.println("printing the list's elements");
-        while(listIterator.hasNext())
-            System.out.println("\t" + coder.decode(listIterator.next()));
+        list.insert(pos, "hello new element!");
+        System.out.println("getting the elements of the list by list.decode(): " + " -> " + list.decode());
     }
 }

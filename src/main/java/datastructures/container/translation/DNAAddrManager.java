@@ -14,7 +14,6 @@ import dnacoders.headercoders.ReedSolomonCoder;
 import utils.*;
 import utils.lsh.LSH;
 import utils.lsh.minhash.MinHashLSH;
-import utils.lsh.storage.LSHStorage;
 import utils.serializers.FixedSizeSerializer;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -32,12 +31,11 @@ public class DNAAddrManager implements AddressManager<Long, BaseSequence> {
     private final UniqueIDGenerator addrGen;
     private final double minDist;
     private final int addressTranslationTrials;
-
+    private final AtomicLong size;
     private final ReadWriteLock addressManagerLock;
 
     private final AddressTranslationManager addressTranslationManager;
     private final AddressRoutingManager addressRoutingManager;
-
 
     private DNAAddrManager(
             LSH<BaseSequence> lsh,
@@ -58,6 +56,7 @@ public class DNAAddrManager implements AddressManager<Long, BaseSequence> {
         this.addressTranslationManager = new AddressTranslationManager(addressTranslationContainer);
         this.badAddresses = new AtomicLong(0L);
         this.addressManagerLock = new ReentrantReadWriteLock();
+        this.size = new AtomicLong(0L);
     }
 
     @Override
@@ -65,61 +64,74 @@ public class DNAAddrManager implements AddressManager<Long, BaseSequence> {
         return routeAndTranslate(addr, true);
     }
 
-    private ManagedAddress<Long, BaseSequence> routeAndTranslate(Long addr, boolean store) {
-        addressManagerLock.readLock().lock();
-        RoutingManager.RoutedAddress<Long> routedAddress = addressRoutingManager.get(addr);
-        TranslationManager.TranslatedAddress<Long, BaseSequence> translatedAddress;
-        if (routedAddress.routed() != null) {
-            addressManagerLock.readLock().unlock();
-            RoutingManager.RoutedAddress<Long> finalRoutedAddress = routedAddress;
-            return ManagedAddress.ofLazy(routedAddress, () -> addressTranslationManager.get(finalRoutedAddress).translated());
-        }
-        else {
-            addressManagerLock.readLock().unlock();
-        }
+    private ManagedAddress<Long, BaseSequence> readManagedAddress(long addr, boolean lockContainers) {
+        try {
+            if (lockContainers)
+                addressManagerLock.readLock().lock();
+            RoutingManager.RoutedAddress<Long> routedAddress = addressRoutingManager.get(addr);
+            if (routedAddress.routed() != null)
+                return ManagedAddress.ofLazy(routedAddress, () -> addressTranslationManager.get(routedAddress).translated());
 
+            return null;
+        }
+        finally {
+            if (lockContainers)
+                addressManagerLock.readLock().unlock();
+        }
+    }
+
+    private void writeNewManagedAddress(long addr, long routed, BaseSequence translated, long addedBadAddresses) {
+        lsh.insert(translated);
+        addressRoutingManager.container.put(addr, routed);
+        addressTranslationManager.container.put(routed, translated);
+        size.incrementAndGet();
+        badAddresses.addAndGet(addedBadAddresses);
+    }
+
+    private ManagedAddress<Long, BaseSequence> routeAndTranslate(Long addr, boolean store) {
+        ManagedAddress<Long, BaseSequence> managed = readManagedAddress(addr, true);
+        if (managed != null)
+            return managed;
+
+        return compute(addr, store);
+    }
+
+    public ManagedAddress<Long, BaseSequence> compute(long addr, boolean store) {
         int trials = 0;
-        Long routed = addr;
-        BaseSequence barcode = addressTranslationManager.compute(routed);
-        BaseSequence barcodeInitial = barcode;
+        long routed = addrGen.get();
+        BaseSequence barcode = coder.apply(routed);
+        long numBadAddresses = 0L;
         while(trials++ < addressTranslationTrials) {
             if (isSufficientDistance(barcode)) {
-                routedAddress = new RoutingManager.RoutedAddress<>(addr, routed);
-                translatedAddress = new TranslationManager.TranslatedAddress<>(routedAddress, barcode);
-                if (store) {
-                    lsh.insert(barcode);
-                    addressManagerLock.writeLock().lock();
-
-                    addressRoutingManager.put(routedAddress);
-                    addressTranslationManager.put(translatedAddress);
-
+                addressManagerLock.writeLock().lock();
+                ManagedAddress<Long, BaseSequence> managed = readManagedAddress(addr, false);
+                if (managed != null) {
                     addressManagerLock.writeLock().unlock();
+                    return managed;
                 }
-
-                return ManagedAddress.of(routedAddress, translatedAddress);
+                if (store)
+                    writeNewManagedAddress(addr, routed, barcode, numBadAddresses);
+                addressManagerLock.writeLock().unlock();
+                return new ManagedAddress<>(addr, routed, barcode);
             }
             else {
-                badAddresses.incrementAndGet();
                 routed = addrGen.get();
-                if (trials < addressTranslationTrials)
-                    barcode = addressTranslationManager.compute(routed);
+                barcode = coder.apply(routed);
+                numBadAddresses++;
             }
         }
-
-        routedAddress = new RoutingManager.RoutedAddress<>(addr, addr);
-        translatedAddress = new TranslationManager.TranslatedAddress<>(routedAddress, barcodeInitial);
         if (store) {
-            lsh.insert(barcode);
-
             addressManagerLock.writeLock().lock();
-
-            addressRoutingManager.put(routedAddress);
-            addressTranslationManager.put(translatedAddress);
-
+            ManagedAddress<Long, BaseSequence> managed = readManagedAddress(addr, false);
+            if (managed != null) {
+                addressManagerLock.writeLock().unlock();
+                return managed;
+            }
+            writeNewManagedAddress(addr, routed, barcode, numBadAddresses);
             addressManagerLock.writeLock().unlock();
         }
 
-        return ManagedAddress.of(routedAddress, new TranslationManager.TranslatedAddress<>(routedAddress, barcodeInitial));
+        return new ManagedAddress<>(addr, routed, barcode);
     }
 
     public int getAddressSize() {
@@ -127,7 +139,7 @@ public class DNAAddrManager implements AddressManager<Long, BaseSequence> {
     }
 
     public long size() {
-        return addrGen.getCurrentNextFreeId();
+        return size.get();
     }
     public long badAddressesCount() {
         return badAddresses.longValue();
@@ -159,8 +171,6 @@ public class DNAAddrManager implements AddressManager<Long, BaseSequence> {
         return new Builder();
     }
 
-
-
     private class AddressRoutingManager implements RoutingManager<Long> {
         Container<Long, Long> container;
 
@@ -174,18 +184,8 @@ public class DNAAddrManager implements AddressManager<Long, BaseSequence> {
         }
 
         @Override
-        public RoutedAddress<Long> get(Long id) {
-            return new RoutedAddress<>(id, container.get(id));
-        }
-
-        @Override
         public RoutedAddress<Long> compute(Long original) {
             return DNAAddrManager.this.routeAndTranslate(original, false).routedAddress();
-        }
-
-        @Override
-        public RoutedAddress<Long> route(Long original) {
-            return DNAAddrManager.this.routeAndTranslate(original, true).routedAddress();
         }
     }
 
@@ -194,11 +194,6 @@ public class DNAAddrManager implements AddressManager<Long, BaseSequence> {
 
         public AddressTranslationManager(Container<Long, BaseSequence> container) {
             this.container = container;
-        }
-
-        @Override
-        public void put(TranslatedAddress<Long, BaseSequence> ta) {
-            container.put(ta.routedAddress().routed(), ta.translated());
         }
 
         @Override
@@ -218,11 +213,7 @@ public class DNAAddrManager implements AddressManager<Long, BaseSequence> {
 
         @Override
         public TranslatedAddress<Long, BaseSequence> compute(RoutingManager.RoutedAddress<Long> routedAddress) {
-            return new TranslatedAddress<>(routedAddress, coder.apply(routedAddress.routed()));
-        }
-
-        public BaseSequence compute(long routedAddress) {
-            return coder.apply(routedAddress);
+            return DNAAddrManager.this.routeAndTranslate(routedAddress.original(), false).asTranslatedAddress();
         }
 
         @Override
@@ -234,18 +225,21 @@ public class DNAAddrManager implements AddressManager<Long, BaseSequence> {
     public static class Builder {
         public static final int DEFAULT_ADDRESS_TRANSLATION_TRIALS = 1000;
         public static final int DEFAULT_ADDRESS_SIZE = 80;
-        public static final int DEFAULT_MIN__ADDRESS_SIZE = 20;
+        public static final int DEFAULT_MIN_ADDRESS_SIZE = 20;
         public static final int DEFAULT_ADDR_NUM_PERMUTATIONS = 16;
         public static final int DEFAULT_ECC_LEN = 0;
         public static final double DEFAULT_MIN_DIST = 0.3d;
         public static final boolean DEFAULT_DEEP_LSH = true;
         public static final Coder<String, BaseSequence> DEFAULT_STRING_CODER = RotatingTre.INSTANCE;
-        public static final BiFunction<Integer, Boolean, LSH<BaseSequence>> DEFAULT_LSH = (addrSize, deep) -> deep ? MinHashLSH.newSeqAmpLSHTraditional(4 * Math.max(1, addrSize / 200), 200, 20, LSHStorage.AmplifiedLSHStorage.Amplification.OR) : MinHashLSH.newSeqAmpLSHLight(4 * Math.max(1, addrSize / 200), 200, 20, LSHStorage.AmplifiedLSHStorage.Amplification.OR);
+        public static final BiFunction<Integer, Boolean, LSH<BaseSequence>> DEFAULT_LSH = (addrSize, deep) -> deep ? MinHashLSH.newSeqLSHTraditional(5, 5) : MinHashLSH.newSeqLSHLight(5, 5);
         public static final Supplier<DNARule> DEFAULT_DNA_RULES = () -> BasicDNARules.INSTANCE;
 
+        // only supported in single-thread mode
         public static final Supplier<Container<Long, Long>> DEFAULT_ADDRESS_ROUTING_CONTAINER_PERSISTENT = () -> new PersistentContainer<>("routing.table", FixedSizeSerializer.LONG);
+
         public static final Supplier<Container<Long, Long>> DEFAULT_ADDRESS_ROUTING_CONTAINER_NOT_PERSISTENT = Container.MapContainer::new;
 
+        // only supported in single-thread mode
         public static final Function<Integer, Container<Long, BaseSequence>> DEFAULT_ADDRESS_TRANSLATION_CONTAINER_PERSISTENT = addrSize -> new PersistentContainer<>("translation.table", new FixedSizeSerializer<>() {
             @Override
             public int serializedSize() {
@@ -276,7 +270,7 @@ public class DNAAddrManager implements AddressManager<Long, BaseSequence> {
 
         public DNAAddrManager build() {
             this.addressEccSize = FuncUtils.conditionOrElse(ecc -> ecc != null && ecc >= 0, addressEccSize, () -> DEFAULT_ECC_LEN);
-            this.addrSize = FuncUtils.conditionOrElse(s -> s != null && s >= DEFAULT_MIN__ADDRESS_SIZE, addrSize, () -> DEFAULT_ADDRESS_SIZE);
+            this.addrSize = FuncUtils.conditionOrElse(s -> s != null && s >= DEFAULT_MIN_ADDRESS_SIZE, addrSize, () -> DEFAULT_ADDRESS_SIZE);
             if (addressEccSize > 0 && addrSize % 4 != 0)
                 throw new RuntimeException("addressSize % 4 != 0");
 
@@ -371,6 +365,8 @@ public class DNAAddrManager implements AddressManager<Long, BaseSequence> {
         }
 
         public Builder setAddrSize(int addrSize) {
+            if (addrSize < DEFAULT_MIN_ADDRESS_SIZE)
+                throw new RuntimeException("address size must be >= " + DEFAULT_MIN_ADDRESS_SIZE);
             this.addrSize = addrSize;
             return this;
         }
@@ -400,7 +396,7 @@ public class DNAAddrManager implements AddressManager<Long, BaseSequence> {
         }
         @Override
         public Integer decodeHeader(BaseSequence encoded) {
-            return null;
+            return 0;
         }
         @Override
         public BaseSequence extractPayload(BaseSequence encoded) {

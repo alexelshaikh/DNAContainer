@@ -1,11 +1,7 @@
 package datastructures.container;
 
 import utils.*;
-
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -39,7 +35,7 @@ public interface Container<K, V> extends Streamable<Pair<K, V>> {
         return keys().stream().map(k -> new Pair<>(k, get(k)));
     }
 
-    static <K, V> Container<K, V> synchronizedContainer(Container<K, V> container) {
+    static <K, V> Container<K, V> readWriteSynchronizedContainer(Container<K, V> container) {
         return new Container<>() {
             final ReadWriteLock lock = new ReentrantReadWriteLock();
 

@@ -3,6 +3,7 @@ package datastructures.container.translation;
 import datastructures.container.Container;
 import utils.Coder;
 import java.util.Collection;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -33,7 +34,7 @@ public interface AddressManager<F, T> extends Coder<F, AddressManager.ManagedAdd
 
     @Override
     default F decode(ManagedAddress<F, T> managedAddress) {
-        return managedAddress.original;
+        return managedAddress.original();
     }
 
     default ManagedAddress<F, T> routeAndTranslate(F original) {
@@ -65,14 +66,14 @@ public interface AddressManager<F, T> extends Coder<F, AddressManager.ManagedAdd
 
     default void put(F original, F routed, T translated) {
         RoutingManager.RoutedAddress<F> routedAddress = new RoutingManager.RoutedAddress<>(original, routed);
-        TranslationManager.TranslatedAddress<F, T> translatedAddress = new TranslationManager.TranslatedAddress<>(routedAddress, translated);
+        TranslationManager.TranslatedAddress<F, T> translatedAddress = TranslationManager.TranslatedAddress.of(routedAddress, translated);
 
         put(routedAddress, translatedAddress);
     }
 
     default void put(ManagedAddress<F, T> managedAddress) {
-        RoutingManager.RoutedAddress<F> routedAddress = new RoutingManager.RoutedAddress<>(managedAddress.original, managedAddress.routed);
-        TranslationManager.TranslatedAddress<F, T> translatedAddress = new TranslationManager.TranslatedAddress<>(routedAddress, managedAddress.translated);
+        RoutingManager.RoutedAddress<F> routedAddress = managedAddress.routedAddress();
+        TranslationManager.TranslatedAddress<F, T> translatedAddress = TranslationManager.TranslatedAddress.of(routedAddress, managedAddress.translated());
 
         put(routedAddress, translatedAddress);
     }
@@ -174,11 +175,11 @@ public interface AddressManager<F, T> extends Coder<F, AddressManager.ManagedAdd
         }
 
         public RoutingManager.RoutedAddress<F> routedAddress() {
-            return new RoutingManager.RoutedAddress<>(original, routed);
+            return new RoutingManager.RoutedAddress<>(original(), routed());
         }
 
         public TranslationManager.TranslatedAddress<F, T> asTranslatedAddress() {
-            return new TranslationManager.TranslatedAddress<>(routedAddress(), translated);
+            return TranslationManager.TranslatedAddress.of(routedAddress(), translated());
         }
 
         public static <F, T> ManagedAddress<F, T> of(RoutingManager.RoutedAddress<F> routed, TranslationManager.TranslatedAddress<F, T> translatedAddress) {
@@ -203,6 +204,31 @@ public interface AddressManager<F, T> extends Coder<F, AddressManager.ManagedAdd
                     translatedAddress
             );
         }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o)
+                return true;
+
+            if (o instanceof ManagedAddress<?, ?> that)
+                return Objects.equals(original(), that.original()) && Objects.equals(routed(), that.routed()) && Objects.equals(translated(), that.translated());
+
+            return false;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(original(), routed(), translated());
+        }
+
+        @Override
+        public String toString() {
+            return "ManagedAddress{" +
+                    "original=" + original() +
+                    ", routed=" + routed() +
+                    ", translated=" + translated() +
+                    '}';
+        }
     }
 
     class LazyManagedAddress<F, T> extends ManagedAddress<F, T> {
@@ -214,17 +240,7 @@ public interface AddressManager<F, T> extends Coder<F, AddressManager.ManagedAdd
         }
 
         @Override
-        public F original() {
-            return super.original();
-        }
-
-        @Override
-        public F routed() {
-            return super.routed();
-        }
-
-        @Override
-        public T translated() {
+        public synchronized T translated() {
             if (translated == null)
                 translated = translatedSupp.get();
 

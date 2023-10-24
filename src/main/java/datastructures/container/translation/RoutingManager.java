@@ -15,11 +15,15 @@ public interface RoutingManager<F> extends Streamable<RoutingManager.RoutedAddre
         return container().size();
     }
     default void put(RoutedAddress<F> routedAddress) {
-        container().put(routedAddress.original, routedAddress.routed);
+        put(routedAddress.original(), routedAddress.routed());
+    }
+
+    default void put(F from, F to) {
+        container().put(from, to);
     }
 
     default boolean remove(RoutedAddress<F> routedAddress) {
-        return container().remove(routedAddress.original);
+        return container().remove(routedAddress.original());
     }
 
     default RoutedAddress<F> route(F original) {
@@ -52,7 +56,7 @@ public interface RoutingManager<F> extends Streamable<RoutingManager.RoutedAddre
 
             @Override
             public void put(RoutedAddress<F> routedAddress) {
-                if (routedAddress.original != routedAddress.routed && !routedAddress.original.equals(routedAddress.routed))
+                if (routedAddress.original() != routedAddress.routed() && !routedAddress.original().equals(routedAddress.routed()))
                     throw new RuntimeException("identity AddressRoutingManager failed to put: " + routedAddress);
 
                 size++;

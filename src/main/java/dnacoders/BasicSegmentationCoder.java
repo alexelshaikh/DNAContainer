@@ -3,6 +3,7 @@ package dnacoders;
 import core.BaseSequence;
 import dnacoders.headercoders.BasicDNAPadder;
 import utils.Coder;
+import java.util.function.BiFunction;
 
 public class BasicSegmentationCoder implements SegmentationCoder {
     private static final BaseSequence DELIM = new BaseSequence("AC");
@@ -22,6 +23,14 @@ public class BasicSegmentationCoder implements SegmentationCoder {
             throw new RuntimeException("targetLength too small");
 
         this.paddingCoder = new BasicDNAPadder(targetLength, DELIM, DELIM_ESC);
+    }
+
+    public BasicSegmentationCoder(int targetLength, int numGcCorrection, BiFunction<BaseSequence, Integer, BaseSequence> fillerFunc) {
+        this.splitLen = targetLength - DELIM.length() - 1 - numGcCorrection;
+        if (splitLen <= 0)
+            throw new RuntimeException("targetLength too small");
+
+        this.paddingCoder = new BasicDNAPadder(targetLength, DELIM, DELIM_ESC, fillerFunc);
     }
 
     @Override

@@ -5,25 +5,35 @@ import datastructures.container.Container;
 public interface TranslationManager<F, T> {
 
     Container<F, T> container();
-    void put(TranslatedAddress<F, T> ta);
     long size();
 
     int addressSize();
     boolean addressIsFixedSize();
     TranslatedAddress<F, T> compute(RoutingManager.RoutedAddress<F> routedAddress);
 
+    default void put(F routed, T translated) {
+        container().put(routed, translated);
+    }
+    default void put(TranslatedAddress<F, T> ta) {
+        put(ta.routed(), ta.translated());
+    }
+
+    default boolean remove(F routed) {
+        return container().remove(routed);
+    }
+
     default boolean remove(RoutingManager.RoutedAddress<F> routed) {
-        return container().remove(routed.routed());
+        return remove(routed.routed());
     }
 
     default boolean remove(TranslatedAddress<F, T> translatedAddress) {
-        return remove(translatedAddress.routedAddress);
+        return remove(translatedAddress.routed());
     }
 
     default TranslatedAddress<F, T> translate(RoutingManager.RoutedAddress<F> routedAddress) {
         T t = container().get(routedAddress.routed());
         if (t != null)
-            return new TranslatedAddress<>(routedAddress, t);
+            return TranslatedAddress.of(routedAddress, t);
 
         TranslatedAddress<F, T> translatedAddress = compute(routedAddress);
         put(translatedAddress);
@@ -31,7 +41,11 @@ public interface TranslationManager<F, T> {
     }
 
     default TranslatedAddress<F, T> get(RoutingManager.RoutedAddress<F> f) {
-        return new TranslatedAddress<>(f, container().get(f.routed()));
+        return get(f.routed());
+    }
+
+    default TranslatedAddress<F, T> get(F routed) {
+        return new TranslatedAddress<>(routed, container().get(routed));
     }
 
 
@@ -51,7 +65,7 @@ public interface TranslationManager<F, T> {
 
             @Override
             public void put(TranslatedAddress<F, F> ta) {
-                if (ta.routedAddress != ta.translated && !ta.routedAddress.routed().equals(ta.translated))
+                if (ta.routed != ta.translated && !ta.routed.equals(ta.translated))
                     throw new RuntimeException("identity AddressTranslationManager failed to put: " + ta);
 
                 size++;
@@ -79,12 +93,15 @@ public interface TranslationManager<F, T> {
 
             @Override
             public TranslatedAddress<F, F> compute(RoutingManager.RoutedAddress<F> routedAddress) {
-                return new TranslatedAddress<>(routedAddress, routedAddress.routed());
+                return new TranslatedAddress<>(routedAddress.routed(), routedAddress.routed());
             }
         };
     }
 
-    record TranslatedAddress<F, T> (RoutingManager.RoutedAddress<F> routedAddress, T translated) {
+    record TranslatedAddress<F, T> (F routed, T translated) {
 
+        static <F, T> TranslatedAddress<F, T> of(RoutingManager.RoutedAddress<F> routedAddress, T translated) {
+            return new TranslatedAddress<>(routedAddress.routed(), translated);
+        }
     }
 }

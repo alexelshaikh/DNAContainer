@@ -6,11 +6,17 @@ import dnacoders.GCFiller;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiFunction;
+import java.util.function.Function;
 
 public class BasicDNAPadder implements HeaderCoder<Base> {
 
     public static final BaseSequence DELIM_DEFAULT = new BaseSequence("CCTTCA");
     public static final BaseSequence DELIM_ESC_DEFAULT = new BaseSequence("GACATC");
+
+    public static final double DEFAULT_FILLER_GC = 0.5;
+
+    public static final Function<Double, BiFunction<BaseSequence, Integer, BaseSequence>> FILLER_RANDOM_CUSTOM_GC = gc -> (seq, n) -> BaseSequence.random(n, (gc * (seq.length() + n) - (double) seq.gcCount()) / n);
+    public static final BiFunction<BaseSequence, Integer, BaseSequence> FILLER_RANDOM = FILLER_RANDOM_CUSTOM_GC.apply(DEFAULT_FILLER_GC);
 
     public static final Base DELIM_NONE = Base.A;
     public static final Base DELIM_ONLY = Base.C;
@@ -116,5 +122,13 @@ public class BasicDNAPadder implements HeaderCoder<Base> {
         result.append(header);
         result.append(seq);
         return result;
+    }
+
+    public BaseSequence getDelim() {
+        return delim;
+    }
+
+    public BaseSequence getDelimEsc() {
+        return delimEsc;
     }
 }
