@@ -58,7 +58,7 @@
         <dependency>
             <groupId>org.json</groupId>
             <artifactId>json</artifactId>
-            <version>20230227</version>
+            <version>20231013</version>
         </dependency>
 
         <dependency>
@@ -67,35 +67,28 @@
             <version>1.0</version>
         </dependency>
 
-        <!-- fixing the vulnerabilities in jitpack by overriding its old libraries -->
 
-        <!-- https://mvnrepository.com/artifact/commons-io/commons-io -->
-        <dependency>
-            <groupId>commons-io</groupId>
-            <artifactId>commons-io</artifactId>
-            <version>2.11.0</version>
-        </dependency>
+        <!-- fixing the vulnerabilities by overriding used libraries -->
 
-        <!-- https://mvnrepository.com/artifact/org.apache.commons/commons-compress -->
+        <!-- https://mvnrepository.com/artifact/org.codehaus.plexus/plexus-archiver -->
         <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-compress</artifactId>
-            <version>1.23.0</version>
+            <groupId>org.codehaus.plexus</groupId>
+            <artifactId>plexus-archiver</artifactId>
+            <version>4.9.1</version>
         </dependency>
 
         <!-- https://mvnrepository.com/artifact/org.apache.maven.shared/maven-shared-utils -->
         <dependency>
             <groupId>org.apache.maven.shared</groupId>
             <artifactId>maven-shared-utils</artifactId>
-            <version>3.3.4</version>
+            <version>3.4.2</version>
         </dependency>
-
-
     </dependencies>
 
+
     <properties>
-        <maven.compiler.source>20</maven.compiler.source>
-        <maven.compiler.target>20</maven.compiler.target>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 

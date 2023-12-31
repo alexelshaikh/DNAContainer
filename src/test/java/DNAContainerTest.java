@@ -31,9 +31,9 @@ public class DNAContainerTest {
         var coderBin = Bin.INSTANCE;
         var coderFountain = Coder.fuse(Application.BIJECTIVE_STRING_CODER, RQCoder.DEFAULT_RQ); // fountain code
 
-        //var coder = coder1;
-        //var coder = coder2;
-        //var coder = coder3;
+        //var coder = coderGoldman;
+        //var coder = coderQuattro;
+        //var coder = coderBin;
         var coder = coderFountain;
 
         DNAAddrManager atm = DNAAddrManager

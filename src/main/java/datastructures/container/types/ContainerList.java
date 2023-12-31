@@ -2,7 +2,6 @@ package datastructures.container.types;
 
 import core.BaseSequence;
 import datastructures.container.DNAContainer;
-import datastructures.container.translation.RoutingManager;
 import datastructures.reference.IDNAFedReference;
 import datastructures.reference.IDNASketch;
 import utils.*;
@@ -17,7 +16,7 @@ public class ContainerList<T> extends IDNAFedReference.DNAFedReference<List<T>, 
         super(
                 sketch,
                 s -> getListOligos(container, s.id()).stream().map(AddressedDNA::payload).toArray(BaseSequence[]::new),
-                s -> FuncUtils.stream(() -> getRichListIterator(container, sketch.id())).map(Pair::getT1).map(coder::decode).toList()
+                s -> FuncUtils.stream(() -> getRichListIterator(container, sketch.id())).map(RichListElement::object).map(coder::decode).toList()
         );
         this.coder = coder;
     }
@@ -33,7 +32,7 @@ public class ContainerList<T> extends IDNAFedReference.DNAFedReference<List<T>, 
     }
 
     public Stream<BaseSequence> encodedObjectsStream() {
-        return FuncUtils.stream(this::getRichListIterator).map(Pair::getT1);
+        return FuncUtils.stream(this::getRichListIterator).map(RichListElement::object);
     }
 
     @Override
@@ -55,15 +54,15 @@ public class ContainerList<T> extends IDNAFedReference.DNAFedReference<List<T>, 
         return getListOligos(sketch.container(), sketch.id()).stream().map(AddressedDNA::address).toArray(BaseSequence[]::new);
     }
 
-    private Iterator<Pair<BaseSequence, Long>> getRichListIterator() {
+    private Iterator<RichListElement> getRichListIterator() {
         return getRichListIterator(sketch);
     }
 
-    public static Iterator<Pair<BaseSequence, Long>> getRichListIterator(IDNASketch.ContainerIdSketch sketch) {
+    public static Iterator<RichListElement> getRichListIterator(IDNASketch.ContainerIdSketch sketch) {
         return getRichListIterator(sketch.container(), sketch.id());
     }
 
-    public static Iterator<Pair<BaseSequence, Long>> getRichListIterator(DNAContainer container, long listId) {
+    public static Iterator<RichListElement> getRichListIterator(DNAContainer container, long listId) {
         BaseSequence seq = container.get(listId);
         if (seq == null)
             return Collections.emptyIterator();
@@ -86,13 +85,13 @@ public class ContainerList<T> extends IDNAFedReference.DNAFedReference<List<T>, 
             }
 
             @Override
-            public Pair<BaseSequence, Long> next() {
+            public RichListElement next() {
                 if (!hasNext())
                     throw new NoSuchElementException("Iterator exhausted! No more elements to return.");
                 BaseSequence r = s.window(DNAPacker.LengthBase.INT_64.totalSize());
                 id = DNAPacker.unpack(s, false).longValue();
                 s = container.get(id);
-                return new Pair<>(r, id);
+                return new RichListElement(id, r);
             }
         };
     }
@@ -156,7 +155,7 @@ public class ContainerList<T> extends IDNAFedReference.DNAFedReference<List<T>, 
         long idNewRouted = atm.routeAndTranslate(idNew).routed();
         long id = sketch.id();
 
-        Long idPrevious = pos == 0 ? Long.valueOf(id) : FuncUtils.stream(() -> getRichListIterator(container, id)).skip(pos - 1).findFirst().map(Pair::getT2).orElse(null);
+        Long idPrevious = pos == 0 ? Long.valueOf(id) : FuncUtils.stream(() -> getRichListIterator(container, id)).skip(pos - 1).findFirst().map(RichListElement::id).orElse(null);
         if (idPrevious == null)
             return append(element);
 
@@ -165,8 +164,8 @@ public class ContainerList<T> extends IDNAFedReference.DNAFedReference<List<T>, 
 
         container.put(idNew, BaseSequence.join(DNAPacker.pack(idNext, DNAPacker.LengthBase.INT_64), coder.encode(element)));
 
-        atm.addressRoutingManager().put(new RoutingManager.RoutedAddress<>(idPrevious, idNewRouted));
-        atm.addressRoutingManager().put(new RoutingManager.RoutedAddress<>(idNext, idPreviousRouted));
+        atm.addressRoutingManager().put(idPrevious, idNewRouted);
+        atm.addressRoutingManager().put(idNext, idPreviousRouted);
 
         return true;
     }
@@ -197,5 +196,9 @@ public class ContainerList<T> extends IDNAFedReference.DNAFedReference<List<T>, 
     @Override
     public String toString() {
         return getListOligos(sketch().container(), sketch.id()).toString();
+    }
+
+    public record RichListElement(long id, BaseSequence object) {
+
     }
 }
