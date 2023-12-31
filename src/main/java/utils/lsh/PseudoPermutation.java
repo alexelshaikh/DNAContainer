@@ -1,11 +1,13 @@
 package utils.lsh;
 
+import java.util.concurrent.ThreadLocalRandom;
+
 public class PseudoPermutation {
 
     private final long m; // num rows/elements (q grams)
-    private final long p; // prime > m
+    private final long p; // prime >= m
     private final long a; // random; 1 <= a <= p - 1
-    private final long b; // random; 1 <= b <= p - 1
+    private final long b; // random; 0 <= b <= p - 1
 
     /**
      * Creates a PseudoPermutation instance. This is an approximation for a real permutation, and is used to accelerate LSH.
@@ -17,8 +19,8 @@ public class PseudoPermutation {
             throw new RuntimeException("p (" + p_1 + ") must be >= m (" + m + ")");
         this.m = m;
         this.p = nextPrime(p_1);
-        this.a = (long) (1 + Math.random() * p);
-        this.b = (long) (1 + Math.random() * p);
+        this.a = ThreadLocalRandom.current().nextLong(1L, p);
+        this.b = ThreadLocalRandom.current().nextLong(0L, p);
     }
 
     public long getP() {
@@ -26,7 +28,7 @@ public class PseudoPermutation {
     }
 
     private static long nextPrime(long start) {
-        long p = start + 1L;
+        long p = start;
         if ((p & 1L) == 0L)
             p++;
         while (!isOddNumberAlsoPrime(p))
